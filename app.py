@@ -22,6 +22,8 @@ class WebCrawlerCache:
     def __init__(self, cache_file=CACHE_FILE):
         self.cache_file = cache_file
         self.cache_data = self.load_cache()
+        self.save_counter = 0  # Counter untuk auto-save periodik
+        self.save_frequency = 5  # Save setiap 5 URLs dalam fresh mode
         
     def load_cache(self):
         """Load cache dari file JSON"""
@@ -47,7 +49,7 @@ class WebCrawlerCache:
         """Ambil konten dari cache"""
         return self.cache_data["urls"].get(url)
     
-    def store_content(self, url, content, title="", links=None):
+    def store_content(self, url, content, title="", links=None, auto_save=False):
         """Simpan konten ke cache"""
         self.cache_data["urls"][url] = {
             "content": content,
@@ -56,6 +58,14 @@ class WebCrawlerCache:
             "timestamp": datetime.now().isoformat(),
             "content_length": len(content)
         }
+        
+        # Auto-save cache if requested (untuk fresh mode)
+        if auto_save:
+            self.save_counter += 1
+            # Save every N URLs untuk mengurangi I/O overhead
+            if self.save_counter % self.save_frequency == 0:
+                self.save_cache()
+                print(f"[AUTO-SAVE] Cache auto-saved after {self.save_counter} URLs")
     
     def get_cache_stats(self):
         """Dapatkan statistik cache"""
@@ -74,6 +84,12 @@ class WebCrawlerCache:
             "max_depth": max_depth,
             "total_urls": len(self.cache_data["urls"])
         }
+    
+    def clear_cache(self):
+        """Hapus semua cache"""
+        self.cache_data = {"urls": {}, "metadata": {}}
+        if os.path.exists(self.cache_file):
+            os.remove(self.cache_file)
     
     def clear_cache(self):
         """Hapus semua cache"""
@@ -112,11 +128,12 @@ def get_page_content(url, use_english, use_cache=True):
             title = soup.title.string if soup.title else ""
             clean_text = get_clean_text_from_html(response.content)
             
-            # Extract links
+            # Extract all links that contain 'ui.ac.id'
             links = [a['href'] for a in soup.find_all('a', href=True) if 'ui.ac.id' in a['href']]
             
-            # Simpan ke cache
-            cache_manager.store_content(url, clean_text, title, links)
+            # Simpan ke cache - auto save jika fresh mode
+            auto_save = not use_cache  # Auto-save hanya jika fresh mode
+            cache_manager.store_content(url, clean_text, title, links, auto_save)
             return clean_text, title, links
     except requests.RequestException as e:
         print(f"Error fetching {url}: {e}")
@@ -148,7 +165,15 @@ def get_links(url, use_english, use_cache=True):
             if not cache_manager.get_cached_content(url):
                 title = soup.title.string if soup.title else ""
                 clean_text = get_clean_text_from_html(response.content)
-                cache_manager.store_content(url, clean_text, title, links)
+                auto_save = not use_cache  # Auto-save jika fresh mode
+                cache_manager.store_content(url, clean_text, title, links, auto_save)
+            else:
+                # Update hanya links jika content sudah ada
+                existing = cache_manager.get_cached_content(url)
+                existing["links"] = links
+                auto_save = not use_cache
+                if auto_save:
+                    cache_manager.save_cache()
             
             return links
     except requests.RequestException as e:
