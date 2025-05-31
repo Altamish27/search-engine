@@ -1,0 +1,34 @@
+{
+  "urls": {
+    "https://www.ui.ac.id": {
+      "content": "Universitas Indonesia (UI) adalah universitas negeri yang terletak di Depok, Jawa Barat dan Salemba, Jakarta Pusat. UI merupakan salah satu universitas terbaik di Indonesia dan Asia Tenggara.",
+      "title": "Universitas Indonesia | UI",
+      "links": [
+        "https://www.ui.ac.id/akademik.html",
+        "https://www.ui.ac.id/penelitian.html",
+        "https://www.ui.ac.id/kemahasiswaan.html",
+        "https://www.ui.ac.id/berita.html"
+      ],
+      "timestamp": "2025-05-31T10:30:00.000000",
+      "content_length": 185
+    },
+    "https://www.ui.ac.id/akademik.html": {
+      "content": "Program akademik UI meliputi program sarjana, magister, dan doktor di berbagai fakultas. UI memiliki 14 fakultas dengan berbagai program studi unggulan.",
+      "title": "Program Akademik - Universitas Indonesia",
+      "links": [
+        "https://www.ui.ac.id/fakultas/kedokteran.html",
+        "https://www.ui.ac.id/fakultas/teknik.html",
+        "https://www.ui.ac.id/fakultas/ekonomi.html"
+      ],
+      "timestamp": "2025-05-31T10:31:00.000000",
+      "content_length": 156
+    }
+  },
+  "metadata": {
+    "last_updated": "2025-05-31T10:31:00.000000",
+    "start_url": "https://www.ui.ac.id",
+    "algorithm": "bfs",
+    "max_depth": 2,
+    "total_urls": 2
+  }
+}
