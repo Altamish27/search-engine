@@ -92,6 +92,24 @@
                     <input type="checkbox" class="form-check-input" id="useEnglish" name="useEnglish">
                     <label class="form-check-label" for="useEnglish">Use English version of the site</label>
                 </div>
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="useCache" name="useCache" checked>
+                    <label class="form-check-label" for="useCache">
+                        <i class="fas fa-memory"></i> Use cached data (faster, but may be outdated)
+                    </label>
+                    <div class="form-text">
+                        <strong>Checked:</strong> Use memoization - search from saved JSON data (faster)<br>
+                        <strong>Unchecked:</strong> Fresh crawling - fetch directly from websites (slower, but current data)
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <button type="button" class="btn btn-info btn-sm me-2" onclick="showCacheStats()">
+                        <i class="fas fa-chart-bar"></i> Cache Statistics
+                    </button>
+                    <button type="button" class="btn btn-warning btn-sm" onclick="clearCache()">
+                        <i class="fas fa-trash"></i> Clear Cache
+                    </button>
+                </div>
                 <button type="submit" class="btn btn-primary">Start Crawling</button>
             </form>
         </div>
@@ -166,15 +184,15 @@
                 searchLog.innerHTML = '';
                 keywordFoundUrls.innerHTML = '';
                 allLinks.innerHTML = '';
-                
-                // Get form data
+                  // Get form data
                 const startUrl = document.getElementById('startUrl').value;
                 const keyword = document.getElementById('keyword').value;
                 const maxDepth = document.getElementById('maxDepth').value;
-                const useEnglish = document.getElementById('useEnglish').checked;                    // Get algorithm
-                    const algorithm = document.getElementById('algorithm').value;
-                    
-                    // Send search request
+                const useEnglish = document.getElementById('useEnglish').checked;
+                const algorithm = document.getElementById('algorithm').value;
+                const useCache = document.getElementById('useCache').checked;
+                
+                // Send search request
                 fetch('/search', {
                     method: 'POST',
                     headers: {
@@ -185,7 +203,8 @@
                         keyword: keyword,
                         max_depth: maxDepth,
                         use_english: useEnglish,
-                        algorithm: algorithm
+                        algorithm: algorithm,
+                        use_cache: useCache
                     })
                 })
                 .then(response => response.json())
@@ -309,14 +328,28 @@
                     } else {
                         allLinks.textContent = 'No links were found.';
                     }
-                    
-                    // Update summary
+                      // Update summary
                     summaryCrawled.textContent = `URLs Crawled: ${data.search_log.filter(log => log.includes('Visiting')).length}`;
                     summaryFound.textContent = `URLs with keyword "${keyword}": ${data.keyword_found_urls.length}`;
                     summaryTotal.textContent = `Total links found: ${data.all_links.length}`;
-                      // Update title with the algorithm used
+                    
+                    // Update title with the algorithm used and cache mode
+                    const cacheMode = data.cache_used ? "(Using Cache)" : "(Fresh Crawl)";
                     document.querySelector('.search-results h2').textContent = 
-                        `Search Results (${data.algorithm.toUpperCase()} Algorithm)`;
+                        `Search Results (${data.algorithm.toUpperCase()} Algorithm) ${cacheMode}`;
+                    
+                    // Display cache stats if available
+                    if (data.cache_stats) {
+                        const cacheInfo = document.createElement('div');
+                        cacheInfo.className = 'alert alert-info mt-3';
+                        cacheInfo.innerHTML = `
+                            <strong>Cache Information:</strong><br>
+                            Total Cached URLs: ${data.cache_stats.total_urls}<br>
+                            Cache Size: ${data.cache_stats.cache_size_mb} MB<br>
+                            Last Updated: ${data.cache_stats.last_updated}
+                        `;
+                        document.querySelector('.search-results').appendChild(cacheInfo);
+                    }
                     
                     // Auto-scroll to results
                     searchResults.scrollIntoView({ behavior: 'smooth' });
@@ -328,6 +361,41 @@
                 });
             });
         });
+        
+        // Function to show cache statistics
+        function showCacheStats() {
+            fetch('/cache-stats')
+                .then(response => response.json())
+                .then(data => {
+                    const message = `Cache Statistics:
+- Total URLs: ${data.total_urls}
+- Cache Size: ${data.cache_size_mb} MB
+- Last Updated: ${data.last_updated || 'Never'}`;
+                    alert(message);
+                })
+                .catch(error => {
+                    alert('Error fetching cache statistics: ' + error.message);
+                });
+        }
+          // Function to clear cache
+        function clearCache() {
+            if (confirm('Are you sure you want to clear all cached data? This action cannot be undone.')) {
+                fetch('/clear-cache', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    alert(data.message);
+                    // Refresh cache stats if needed
+                })
+                .catch(error => {
+                    alert('Error clearing cache: ' + error.message);
+                });
+            }
+        }
     </script>
 </body>
 </html>
