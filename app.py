@@ -90,12 +90,6 @@ class WebCrawlerCache:
         self.cache_data = {"urls": {}, "metadata": {}}
         if os.path.exists(self.cache_file):
             os.remove(self.cache_file)
-    
-    def clear_cache(self):
-        """Hapus semua cache"""
-        self.cache_data = {"urls": {}, "metadata": {}}
-        if os.path.exists(self.cache_file):
-            os.remove(self.cache_file)
 
 # Initialize cache
 cache_manager = WebCrawlerCache()
@@ -140,7 +134,6 @@ def get_page_content(url, use_english, use_cache=True):
     
     return "", "", []
 
-# Fungsi untuk mendapatkan semua link href dari halaman
 def get_links(url, use_english, use_cache=True):
     """Ambil semua link dari halaman dengan opsi cache"""
     if use_english:
@@ -180,15 +173,25 @@ def get_links(url, use_english, use_cache=True):
         print(f"Error fetching {url}: {e}")
     return []
 
-# Fungsi untuk mencari kata kunci di halaman dengan memoization
 def search_keyword_in_page(url, keyword, use_english, use_cache=True):
-    """Cari keyword di halaman dengan memoization dan TF-IDF"""
+    """Cari keyword di halaman dengan memoization dan TF-IDF, return similarity score"""
     if not keyword.strip():
-        return False
+        return False, 0.0
     
-    content, title, links = get_page_content(url, use_english, use_cache)
-    if not content:
-        return False
+    # Jika menggunakan cache, ambil content dari cache
+    if use_cache:
+        cached_data = cache_manager.get_cached_content(url)
+        if cached_data:
+            content = cached_data.get("content", "")
+            if not content:
+                return False, 0.0
+        else:
+            return False, 0.0
+    else:
+        # Jika fresh mode, ambil dari web
+        content, title, links = get_page_content(url, use_english, use_cache)
+        if not content:
+            return False, 0.0
     
     # Gunakan TF-IDF untuk pencarian yang lebih akurat
     try:
@@ -197,22 +200,27 @@ def search_keyword_in_page(url, keyword, use_english, use_cache=True):
         similarity = cosine_similarity(tfidf[0:1], tfidf[1:2])
         similarity_score = similarity[0][0]
         print(f"[{url}] TF-IDF similarity: {similarity_score:.4f}")
-        return similarity_score > 0.01
+        return similarity_score > 0.01, similarity_score
     except:
         # Fallback ke pencarian sederhana
-        return keyword.lower() in content.lower()
+        is_found = keyword.lower() in content.lower()
+        fallback_score = 0.1 if is_found else 0.0
+        print(f"[{url}] Fallback similarity: {fallback_score:.4f}")
+        return is_found, fallback_score
 
-# Fungsi BFS untuk menemukan semua link dengan batas kedalaman
 def bfs(start_url, max_depth, keyword="", use_english=False, use_cache=True, progress_callback=None):
     """BFS dengan opsi cache dan memoization"""
-    visited = set()  # Set untuk menyimpan URL yang sudah dikunjungi
-    queue = deque([(start_url, 0, [])])  # Antrian untuk BFS (URL, kedalaman, path yang dilalui)
-    all_links = set()  # Set untuk menyimpan semua link yang ditemukan
-    keyword_found_urls = set()  # Set untuk menyimpan URL yang mengandung kata kunci
-    search_log = []  # Untuk menyimpan log pencarian
-    path_info = {}  # Dictionary untuk menyimpan informasi path setiap URL yang mengandung kata kunci
+    visited = set()
+    queue = deque([(start_url, 0, [])])
+    all_links = set()
+    keyword_found_urls = set()
+    search_log = []
+    path_info = {}
+    similarity_scores = {}
 
     visited_count = 0
+    cache_hits = 0
+    cache_misses = 0
     
     cache_mode = "[CACHE MODE]" if use_cache else "[FRESH MODE]"
     search_log.append(f"{cache_mode} Starting BFS crawling from {start_url}")
@@ -220,161 +228,309 @@ def bfs(start_url, max_depth, keyword="", use_english=False, use_cache=True, pro
     while queue:
         current_url, depth, path = queue.popleft()
         
-        # Jika max_depth adalah -1, berarti kedalaman tidak terbatas
         if max_depth != -1 and depth > max_depth:
             continue
         
         if current_url not in visited:
             visited.add(current_url)
             visited_count += 1
-            log_entry = f"Visiting (Depth {depth}): {current_url}"
+            
+            # Jika menggunakan cache mode, cek apakah URL sudah ada di cache
+            if use_cache:
+                cached_data = cache_manager.get_cached_content(current_url)
+                if cached_data:
+                    cache_hits += 1
+                    log_entry = f"[CACHE-HIT] (Depth {depth}): {current_url}"
+                    search_log.append(log_entry)
+                    print(log_entry)
+                    
+                    # Ambil data dari cache tanpa network request
+                    content = cached_data.get("content", "")
+                    links = cached_data.get("links", [])
+                    
+                    # Update progress
+                    if progress_callback:
+                        progress_callback({
+                            'status': 'cache_hit',
+                            'url': current_url,
+                            'depth': depth,
+                            'visited_count': visited_count,
+                            'cache_hits': cache_hits,
+                            'log': log_entry
+                        })
+                    
+                    # Cek keyword dari cache menggunakan TF-IDF
+                    if keyword:
+                        is_found, similarity_score = search_keyword_in_page(current_url, keyword, use_english, use_cache)
+                        if is_found:
+                            log_entry = f"Keyword '{keyword}' found in cache: {current_url} (Similarity: {similarity_score:.4f})"
+                            search_log.append(log_entry)
+                            print(log_entry)
+                            keyword_found_urls.add(current_url)
+                            path_with_current = path + [current_url]
+                            path_info[current_url] = path_with_current
+                            similarity_scores[current_url] = similarity_score
+                            path_log = f"Path to keyword: {' -> '.join(path_with_current)}"
+                            search_log.append(path_log)
+                            print(path_log)
+                            
+                            if progress_callback:
+                                progress_callback({
+                                    'status': 'found',
+                                    'url': current_url,
+                                    'path': path_with_current,
+                                    'similarity_score': similarity_score,
+                                    'log': log_entry
+                                })
+                    
+                    # Tambahkan links dari cache
+                    all_links.update(links)
+                    
+                    # Tambahkan link yang belum dikunjungi ke dalam antrian
+                    for link in links:
+                        if link not in visited:
+                            queue.append((link, depth + 1, path + [current_url]))
+                    
+                    # Tidak perlu sleep karena tidak ada network request
+                    continue
+            
+            # Jika tidak ada di cache atau fresh mode, lakukan network request
+            cache_misses += 1
+            log_entry = f"[FETCHING] (Depth {depth}): {current_url}"
             search_log.append(log_entry)
             print(log_entry)
             
             # Update progress jika callback diberikan
             if progress_callback:
                 progress_callback({
-                    'status': 'searching',
+                    'status': 'fetching',
                     'url': current_url,
                     'depth': depth,
                     'visited_count': visited_count,
+                    'cache_misses': cache_misses,
                     'log': log_entry,
                     'cache_mode': use_cache
                 })
             
             # Mencari kata kunci di halaman
-            if keyword and search_keyword_in_page(current_url, keyword, use_english, use_cache):
-                log_entry = f"Keyword '{keyword}' found at: {current_url}"
-                search_log.append(log_entry)
-                print(log_entry)
-                keyword_found_urls.add(current_url)
-                # Simpan path menuju URL yang mengandung kata kunci
-                path_with_current = path + [current_url]
-                path_info[current_url] = path_with_current
-                path_log = f"Path to keyword: {' -> '.join(path_with_current)}"
-                search_log.append(path_log)
-                print(path_log)
-                
-                if progress_callback:
-                    progress_callback({
-                        'status': 'found',
-                        'url': current_url,
-                        'path': path_with_current,
-                        'log': log_entry
-                    })
+            if keyword:
+                is_found, similarity_score = search_keyword_in_page(current_url, keyword, use_english, use_cache)
+                if is_found:
+                    log_entry = f"Keyword '{keyword}' found at: {current_url} (Similarity: {similarity_score:.4f})"
+                    search_log.append(log_entry)
+                    print(log_entry)
+                    keyword_found_urls.add(current_url)
+                    path_with_current = path + [current_url]
+                    path_info[current_url] = path_with_current
+                    similarity_scores[current_url] = similarity_score
+                    path_log = f"Path to keyword: {' -> '.join(path_with_current)}"
+                    search_log.append(path_log)
+                    print(path_log)
+                    
+                    if progress_callback:
+                        progress_callback({
+                            'status': 'found',
+                            'url': current_url,
+                            'path': path_with_current,
+                            'similarity_score': similarity_score,
+                            'log': log_entry
+                        })
 
-            links = get_links(current_url, use_english, use_cache)  # Mendapatkan semua link dari halaman
-            all_links.update(links)  # Menambahkan link baru ke set all_links
+            links = get_links(current_url, use_english, use_cache)
+            all_links.update(links)
             
             # Tambahkan link yang belum dikunjungi ke dalam antrian
             for link in links:
                 if link not in visited:
                     queue.append((link, depth + 1, path + [current_url]))
 
-            # Agar tidak terlalu cepat mengirim permintaan - lebih cepat jika pakai cache
-            time.sleep(0.1 if use_cache else 0.2)
+            # Sleep hanya untuk network request (fresh mode atau cache miss)
+            time.sleep(0.2)
 
     # Simpan cache setelah crawling selesai (hanya jika mode fresh)
     if not use_cache:
         cache_manager.update_metadata(start_url, "bfs", max_depth)
         cache_manager.save_cache()
     
+    # Log statistik cache
+    if use_cache:
+        cache_stats_log = f"Cache Performance - Hits: {cache_hits}, Misses: {cache_misses}, Hit Ratio: {cache_hits/(cache_hits+cache_misses)*100:.1f}%"
+        search_log.append(cache_stats_log)
+        print(cache_stats_log)
+    
     if progress_callback:
         progress_callback({
             'status': 'complete',
             'visited_count': visited_count,
             'all_links_count': len(all_links),
-            'keyword_found_count': len(keyword_found_urls)
+            'keyword_found_count': len(keyword_found_urls),
+            'cache_hits': cache_hits if use_cache else 0,
+            'cache_misses': cache_misses
         })
         
-    return all_links, keyword_found_urls, search_log, path_info
+    return all_links, keyword_found_urls, search_log, path_info, similarity_scores
 
-# Fungsi DFS untuk menemukan semua link dengan batas kedalaman
 def dfs(start_url, max_depth, keyword="", use_english=False, use_cache=True, progress_callback=None):
     """DFS dengan opsi cache dan memoization"""
-    visited = set()  # Set untuk menyimpan URL yang sudah dikunjungi
-    stack = [(start_url, 0, [])]  # Stack untuk DFS (URL, kedalaman, path yang dilalui)
-    all_links = set()  # Set untuk menyimpan semua link yang ditemukan
-    keyword_found_urls = set()  # Set untuk menyimpan URL yang mengandung kata kunci
-    search_log = []  # Untuk menyimpan log pencarian
-    path_info = {}  # Dictionary untuk menyimpan informasi path setiap URL yang mengandung kata kunci
+    visited = set()
+    stack = [(start_url, 0, [])]
+    all_links = set()
+    keyword_found_urls = set()
+    search_log = []
+    path_info = {}
+    similarity_scores = {}
 
     visited_count = 0
+    cache_hits = 0
+    cache_misses = 0
     
     cache_mode = "[CACHE MODE]" if use_cache else "[FRESH MODE]"
     search_log.append(f"{cache_mode} Starting DFS crawling from {start_url}")
     
     while stack:
-        current_url, depth, path = stack.pop()  # Pop dari atas stack (LIFO)
+        current_url, depth, path = stack.pop()
         
-        # Jika max_depth adalah -1, berarti kedalaman tidak terbatas
         if max_depth != -1 and depth > max_depth:
             continue
         
         if current_url not in visited:
             visited.add(current_url)
             visited_count += 1
-            log_entry = f"Visiting (Depth {depth}): {current_url}"
+            
+            # Jika menggunakan cache mode, cek apakah URL sudah ada di cache
+            if use_cache:
+                cached_data = cache_manager.get_cached_content(current_url)
+                if cached_data:
+                    cache_hits += 1
+                    log_entry = f"[CACHE-HIT] (Depth {depth}): {current_url}"
+                    search_log.append(log_entry)
+                    print(log_entry)
+                    
+                    # Ambil data dari cache tanpa network request
+                    content = cached_data.get("content", "")
+                    links = cached_data.get("links", [])
+                    
+                    # Update progress
+                    if progress_callback:
+                        progress_callback({
+                            'status': 'cache_hit',
+                            'url': current_url,
+                            'depth': depth,
+                            'visited_count': visited_count,
+                            'cache_hits': cache_hits,
+                            'log': log_entry
+                        })
+                    
+                    # Cek keyword dari cache menggunakan TF-IDF
+                    if keyword:
+                        is_found, similarity_score = search_keyword_in_page(current_url, keyword, use_english, use_cache)
+                        if is_found:
+                            log_entry = f"Keyword '{keyword}' found in cache: {current_url} (Similarity: {similarity_score:.4f})"
+                            search_log.append(log_entry)
+                            print(log_entry)
+                            keyword_found_urls.add(current_url)
+                            path_with_current = path + [current_url]
+                            path_info[current_url] = path_with_current
+                            similarity_scores[current_url] = similarity_score
+                            path_log = f"Path to keyword: {' -> '.join(path_with_current)}"
+                            search_log.append(path_log)
+                            print(path_log)
+                            
+                            if progress_callback:
+                                progress_callback({
+                                    'status': 'found',
+                                    'url': current_url,
+                                    'path': path_with_current,
+                                    'similarity_score': similarity_score,
+                                    'log': log_entry
+                                })
+                    
+                    # Tambahkan links dari cache
+                    all_links.update(links)
+                    
+                    # Tambahkan link yang belum dikunjungi ke dalam stack (urutan terbalik agar traversal DFS benar)
+                    for link in reversed(links):
+                        if link not in visited:
+                            stack.append((link, depth + 1, path + [current_url]))
+                    
+                    # Tidak perlu sleep karena tidak ada network request
+                    continue
+            
+            # Jika tidak ada di cache atau fresh mode, lakukan network request
+            cache_misses += 1
+            log_entry = f"[FETCHING] (Depth {depth}): {current_url}"
             search_log.append(log_entry)
             print(log_entry)
             
             # Update progress jika callback diberikan
             if progress_callback:
                 progress_callback({
-                    'status': 'searching',
+                    'status': 'fetching',
                     'url': current_url,
                     'depth': depth,
                     'visited_count': visited_count,
+                    'cache_misses': cache_misses,
                     'log': log_entry,
                     'cache_mode': use_cache
                 })
             
             # Mencari kata kunci di halaman
-            if keyword and search_keyword_in_page(current_url, keyword, use_english, use_cache):
-                log_entry = f"Keyword '{keyword}' found at: {current_url}"
-                search_log.append(log_entry)
-                print(log_entry)
-                keyword_found_urls.add(current_url)
-                # Simpan path menuju URL yang mengandung kata kunci
-                path_with_current = path + [current_url]
-                path_info[current_url] = path_with_current
-                path_log = f"Path to keyword: {' -> '.join(path_with_current)}"
-                search_log.append(path_log)
-                print(path_log)
-                
-                if progress_callback:
-                    progress_callback({
-                        'status': 'found',
-                        'url': current_url,
-                        'path': path_with_current,
-                        'log': log_entry
-                    })
+            if keyword:
+                is_found, similarity_score = search_keyword_in_page(current_url, keyword, use_english, use_cache)
+                if is_found:
+                    log_entry = f"Keyword '{keyword}' found at: {current_url} (Similarity: {similarity_score:.4f})"
+                    search_log.append(log_entry)
+                    print(log_entry)
+                    keyword_found_urls.add(current_url)
+                    path_with_current = path + [current_url]
+                    path_info[current_url] = path_with_current
+                    similarity_scores[current_url] = similarity_score
+                    path_log = f"Path to keyword: {' -> '.join(path_with_current)}"
+                    search_log.append(path_log)
+                    print(path_log)
+                    
+                    if progress_callback:
+                        progress_callback({
+                            'status': 'found',
+                            'url': current_url,
+                            'path': path_with_current,
+                            'similarity_score': similarity_score,
+                            'log': log_entry
+                        })
 
-            links = get_links(current_url, use_english, use_cache)  # Mendapatkan semua link dari halaman
-            all_links.update(links)  # Menambahkan link baru ke set all_links
+            links = get_links(current_url, use_english, use_cache)
+            all_links.update(links)
             
             # Tambahkan link yang belum dikunjungi ke dalam stack (urutan terbalik agar traversal DFS benar)
             for link in reversed(links):
                 if link not in visited:
                     stack.append((link, depth + 1, path + [current_url]))
 
-            # Agar tidak terlalu cepat mengirim permintaan - lebih cepat jika pakai cache
-            time.sleep(0.1 if use_cache else 0.2)
+            # Sleep hanya untuk network request (fresh mode atau cache miss)
+            time.sleep(0.2)
 
     # Simpan cache setelah crawling selesai (hanya jika mode fresh)
     if not use_cache:
         cache_manager.update_metadata(start_url, "dfs", max_depth)
         cache_manager.save_cache()
     
+    # Log statistik cache
+    if use_cache:
+        cache_stats_log = f"Cache Performance - Hits: {cache_hits}, Misses: {cache_misses}, Hit Ratio: {cache_hits/(cache_hits+cache_misses)*100:.1f}%"
+        search_log.append(cache_stats_log)
+        print(cache_stats_log)
+    
     if progress_callback:
         progress_callback({
             'status': 'complete',
             'visited_count': visited_count,
             'all_links_count': len(all_links),
-            'keyword_found_count': len(keyword_found_urls)
+            'keyword_found_count': len(keyword_found_urls),
+            'cache_hits': cache_hits if use_cache else 0,
+            'cache_misses': cache_misses
         })
         
-    return all_links, keyword_found_urls, search_log, path_info
+    return all_links, keyword_found_urls, search_log, path_info, similarity_scores
 
 @app.route('/')
 def index():
@@ -398,12 +554,12 @@ def search():
     max_depth = int(data.get('max_depth', -1))
     keyword = data.get('keyword', '')
     use_english = data.get('use_english', False)
-    algorithm = data.get('algorithm', 'bfs')  # Default to BFS if not specified
-    use_cache = data.get('use_cache', True)  # Parameter baru untuk cache mode
+    algorithm = data.get('algorithm', 'bfs')
+    use_cache = data.get('use_cache', True)
     
     # Pilih algoritma yang akan digunakan
     if algorithm.lower() == 'dfs':
-        all_links, keyword_found_urls, search_log, path_info = dfs(
+        all_links, keyword_found_urls, search_log, path_info, similarity_scores = dfs(
             start_url, 
             max_depth, 
             keyword, 
@@ -411,19 +567,26 @@ def search():
             use_cache
         )
     else:
-        all_links, keyword_found_urls, search_log, path_info = bfs(
+        all_links, keyword_found_urls, search_log, path_info, similarity_scores = bfs(
             start_url, 
             max_depth, 
             keyword, 
             use_english,
             use_cache
         )
+      # Sort keyword_found_urls by similarity score (highest first)
+    sorted_keyword_found_urls = sorted(
+        list(keyword_found_urls), 
+        key=lambda url: similarity_scores.get(url, 0), 
+        reverse=True
+    )
     
     return jsonify({
         'all_links': list(all_links),
-        'keyword_found_urls': list(keyword_found_urls),
+        'keyword_found_urls': sorted_keyword_found_urls,
         'search_log': search_log,
         'path_info': path_info,
+        'similarity_scores': similarity_scores,
         'algorithm': algorithm,
         'cache_used': use_cache,
         'cache_stats': cache_manager.get_cache_stats()

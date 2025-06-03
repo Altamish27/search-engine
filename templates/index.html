@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">    <title>Web Crawler - Search Algorithm</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Crawler - Search Algorithm</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -61,6 +62,46 @@
             border-top: none;
             border-radius: 0 0 5px 5px;
         }
+        .similarity-score {
+            font-size: 0.85em;
+            color: #6c757d;
+            margin-top: 4px;
+        }
+        .similarity-badge {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            font-size: 0.75em;
+            font-weight: 600;
+        }
+        .url-item {
+            transition: all 0.2s ease;
+        }
+        .url-item:hover {
+            background-color: #f8f9fa;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .path-visualization {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 8px;
+        }        .path-arrow {
+            color: #6c757d;
+            margin: 0 8px;
+        }
+        .rank-badge {
+            min-width: 35px;
+            height: 25px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.8em;
+        }
+        .rank-1 { background: linear-gradient(45deg, #ffd700, #ffed4e) !important; color: #333; }
+        .rank-2 { background: linear-gradient(45deg, #c0c0c0, #e5e5e5) !important; color: #333; }
+        .rank-3 { background: linear-gradient(45deg, #cd7f32, #daa520) !important; color: white; }
     </style>
 </head>
 <body>
@@ -81,7 +122,8 @@
                 <div class="mb-3">
                     <label for="maxDepth" class="form-label">Max Depth (-1 for unlimited)</label>
                     <input type="number" class="form-control" id="maxDepth" name="maxDepth" value="2">
-                </div>                <div class="mb-3">
+                </div>
+                <div class="mb-3">
                     <label for="algorithm" class="form-label">Search Algorithm</label>
                     <select class="form-select" id="algorithm" name="algorithm">
                         <option value="bfs" selected>Breadth-First Search (BFS)</option>
@@ -128,9 +170,10 @@
             <ul class="nav nav-tabs" id="resultTabs" role="tablist">
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="log-tab" data-bs-toggle="tab" data-bs-target="#log" type="button" role="tab">Search Log</button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="found-tab" data-bs-toggle="tab" data-bs-target="#found" type="button" role="tab">Found URLs</button>
+                </li>                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="found-tab" data-bs-toggle="tab" data-bs-target="#found" type="button" role="tab">
+                        <i class="fas fa-sort-amount-down"></i> Found URLs (Sorted)
+                    </button>
                 </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="all-tab" data-bs-toggle="tab" data-bs-target="#all" type="button" role="tab">All Links</button>
@@ -184,7 +227,8 @@
                 searchLog.innerHTML = '';
                 keywordFoundUrls.innerHTML = '';
                 allLinks.innerHTML = '';
-                  // Get form data
+                
+                // Get form data
                 const startUrl = document.getElementById('startUrl').value;
                 const keyword = document.getElementById('keyword').value;
                 const maxDepth = document.getElementById('maxDepth').value;
@@ -219,34 +263,123 @@
                         logEntry.textContent = log;
                         searchLog.appendChild(logEntry);
                     });
-                      // Display keyword found URLs with path visualization buttons
+                      // Display keyword found URLs WITH SIMILARITY SCORES (sorted by highest score)
                     if (data.keyword_found_urls.length > 0) {
+                        // Add sorting information header
+                        const sortInfo = document.createElement('div');
+                        sortInfo.className = 'alert alert-success mb-3';
+                        sortInfo.innerHTML = `
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-sort-amount-down me-2"></i>
+                                <strong>Results sorted by TF-IDF similarity score (highest first)</strong>
+                            </div>
+                            <small class="text-muted">Found ${data.keyword_found_urls.length} URLs containing the keyword "${keyword}"</small>
+                        `;
+                        keywordFoundUrls.appendChild(sortInfo);
+                        
                         const list = document.createElement('ul');
                         list.className = 'list-group';
                         
-                        data.keyword_found_urls.forEach(url => {
-                            const item = document.createElement('li');
-                            item.className = 'list-group-item d-flex justify-content-between align-items-center flex-wrap';
+                        data.keyword_found_urls.forEach((url, index) => {                            const item = document.createElement('li');
+                            item.className = 'list-group-item url-item';
+                            
+                            // Create main container
+                            const mainContainer = document.createElement('div');
+                            mainContainer.className = 'd-flex justify-content-between align-items-start';
+                            
+                            // Left side - Ranking number, URL and similarity info
+                            const leftContainer = document.createElement('div');
+                            leftContainer.className = 'flex-grow-1 d-flex align-items-start';
+                              // Ranking number with special styling for top 3
+                            const rankBadge = document.createElement('span');
+                            let badgeClass = 'badge me-3 mt-1 rank-badge';
+                            if (index === 0) {
+                                badgeClass += ' rank-1'; // Gold for #1
+                            } else if (index === 1) {
+                                badgeClass += ' rank-2'; // Silver for #2
+                            } else if (index === 2) {
+                                badgeClass += ' rank-3'; // Bronze for #3
+                            } else {
+                                badgeClass += ' bg-primary'; // Blue for others
+                            }
+                            rankBadge.className = badgeClass;
+                            rankBadge.textContent = `#${index + 1}`;
+                            leftContainer.appendChild(rankBadge);
+                            
+                            // URL and similarity container
+                            const urlContainer = document.createElement('div');
+                            urlContainer.className = 'flex-grow-1';
                             
                             // URL Link
-                            const linkContainer = document.createElement('div');
-                            linkContainer.className = 'url-container';
-                            
                             const link = document.createElement('a');
                             link.href = url;
                             link.textContent = url;
                             link.target = '_blank';
-                            linkContainer.appendChild(link);
+                            link.className = 'text-decoration-none fw-medium';
+                            urlContainer.appendChild(link);
+                              // Similarity Score Display
+                            const similarityScore = data.similarity_scores ? data.similarity_scores[url] : null;
+                            if (similarityScore !== null && similarityScore > 0) {
+                                const scoreContainer = document.createElement('div');
+                                scoreContainer.className = 'similarity-score mt-2';
+                                
+                                const scoreIcon = document.createElement('i');
+                                scoreIcon.className = 'fas fa-chart-line me-1';
+                                
+                                const scoreText = document.createElement('span');
+                                const percentage = (similarityScore * 100).toFixed(2);
+                                scoreText.textContent = `TF-IDF Similarity: ${percentage}%`;
+                                
+                                // Add color coding based on similarity score
+                                if (similarityScore >= 0.7) {
+                                    scoreContainer.className += ' text-success';
+                                } else if (similarityScore >= 0.4) {
+                                    scoreContainer.className += ' text-warning';
+                                } else {
+                                    scoreContainer.className += ' text-info';
+                                }
+                                
+                                scoreContainer.appendChild(scoreIcon);
+                                scoreContainer.appendChild(scoreText);
+                                urlContainer.appendChild(scoreContainer);
+                            }
+                            
+                            leftContainer.appendChild(urlContainer);
+                            
+                            // Right side - badges and controls
+                            const rightContainer = document.createElement('div');
+                            rightContainer.className = 'd-flex flex-column align-items-end gap-2';
+                            
+                            // Found badge
+                            const foundBadge = document.createElement('span');
+                            foundBadge.className = 'badge bg-success';
+                            foundBadge.innerHTML = '<i class="fas fa-check"></i> Found';
+                            rightContainer.appendChild(foundBadge);
+                            
+                            // Similarity score badge
+                            if (similarityScore !== null && similarityScore > 0) {
+                                const scoreBadge = document.createElement('span');
+                                scoreBadge.className = 'badge similarity-badge';
+                                const percentage = (similarityScore * 100).toFixed(1);
+                                scoreBadge.textContent = `${percentage}%`;
+                                rightContainer.appendChild(scoreBadge);
+                            }
                             
                             // Path button
                             const pathButton = document.createElement('button');
-                            pathButton.className = 'btn btn-sm btn-outline-info ms-2';
-                            pathButton.innerHTML = '<i class="fas fa-route"></i> Show Path';
+                            pathButton.className = 'btn btn-sm btn-outline-info';
+                            pathButton.innerHTML = '<i class="fas fa-route"></i> Path';
                             pathButton.dataset.url = url;
+                            rightContainer.appendChild(pathButton);
+                            
+                            // Add to main container
+                            mainContainer.appendChild(leftContainer);
+                            mainContainer.appendChild(rightContainer);
+                            item.appendChild(mainContainer);
                             
                             // Path container (initially hidden)
                             const pathContainer = document.createElement('div');
-                            pathContainer.className = 'path-container mt-2 w-100 d-none';
+                            pathContainer.className = 'path-container mt-3 d-none';
                             pathContainer.id = `path-${url.replace(/[^a-zA-Z0-9]/g, '-')}`;
                             
                             // Add click event for path button
@@ -260,50 +393,67 @@
                                         
                                         const pathTitle = document.createElement('h6');
                                         pathTitle.className = 'text-muted mb-2';
-                                        pathTitle.textContent = 'Path from Start URL to Keyword:';
+                                        pathTitle.innerHTML = '<i class="fas fa-sitemap"></i> Crawl Path to This URL:';
                                         pathContainer.appendChild(pathTitle);
                                         
                                         const pathView = document.createElement('div');
-                                        pathView.className = 'path-visualization border rounded p-2';
+                                        pathView.className = 'path-visualization';
                                         
                                         pathInfo.forEach((pathUrl, index) => {
                                             // Create link
                                             const pathLink = document.createElement('a');
                                             pathLink.href = pathUrl;
-                                            pathLink.textContent = pathUrl;
                                             pathLink.target = '_blank';
-                                            pathLink.className = index === pathInfo.length - 1 ? 'text-success fw-bold' : '';
+                                            pathLink.className = 'text-decoration-none';
+                                            
+                                            // Truncate long URLs for display
+                                            const displayUrl = pathUrl.length > 60 ? 
+                                                pathUrl.substring(0, 60) + '...' : pathUrl;
+                                            pathLink.textContent = displayUrl;
+                                            
+                                            // Style the final URL (where keyword was found)
+                                            if (index === pathInfo.length - 1) {
+                                                pathLink.className += ' text-success fw-bold';
+                                            }
+                                            
                                             pathView.appendChild(pathLink);
                                             
                                             // Add arrow if not the last item
                                             if (index < pathInfo.length - 1) {
                                                 const arrow = document.createElement('span');
                                                 arrow.className = 'path-arrow';
-                                                arrow.innerHTML = ' <i class="fas fa-arrow-right"></i> ';
+                                                arrow.innerHTML = '<i class="fas fa-arrow-right"></i>';
                                                 pathView.appendChild(arrow);
+                                                
+                                                // Add line break for better readability
+                                                if (index % 2 === 1) {
+                                                    pathView.appendChild(document.createElement('br'));
+                                                }
                                             }
                                         });
                                         
                                         pathContainer.appendChild(pathView);
+                                        pathButton.innerHTML = '<i class="fas fa-eye-slash"></i> Hide';
                                     } else {
-                                        pathContainer.innerHTML = '<p class="text-muted">No path information available</p>';
+                                        pathContainer.innerHTML = '<p class="text-muted mb-0">No path information available</p>';
+                                        pathContainer.classList.remove('d-none');
                                     }
                                 } else {
                                     pathContainer.classList.add('d-none');
+                                    pathButton.innerHTML = '<i class="fas fa-route"></i> Path';
                                 }
                             });
                             
-                            // Add to item
-                            item.appendChild(linkContainer);
-                            item.appendChild(pathButton);
                             item.appendChild(pathContainer);
-                            
                             list.appendChild(item);
                         });
                         
                         keywordFoundUrls.appendChild(list);
                     } else {
-                        keywordFoundUrls.textContent = keyword ? 'No URLs containing the keyword were found.' : 'No keyword specified for search.';
+                        keywordFoundUrls.innerHTML = `<div class="text-center text-muted py-4">
+                            <i class="fas fa-search fa-3x mb-3"></i>
+                            <p>${keyword ? 'No URLs containing the keyword were found.' : 'No keyword specified for search.'}</p>
+                        </div>`;
                     }
                     
                     // Display all links
@@ -319,6 +469,7 @@
                             link.href = url;
                             link.textContent = url;
                             link.target = '_blank';
+                            link.className = 'text-decoration-none';
                             
                             item.appendChild(link);
                             list.appendChild(item);
@@ -326,11 +477,14 @@
                         
                         allLinks.appendChild(list);
                     } else {
-                        allLinks.textContent = 'No links were found.';
+                        allLinks.innerHTML = `<div class="text-center text-muted py-4">
+                            <i class="fas fa-link fa-3x mb-3"></i>
+                            <p>No links were found.</p>
+                        </div>`;
                     }
                       // Update summary
                     summaryCrawled.textContent = `URLs Crawled: ${data.search_log.filter(log => log.includes('Visiting')).length}`;
-                    summaryFound.textContent = `URLs with keyword "${keyword}": ${data.keyword_found_urls.length}`;
+                    summaryFound.innerHTML = `URLs with keyword "<strong>${keyword}</strong>": ${data.keyword_found_urls.length} <small class="text-muted">(sorted by similarity score)</small>`;
                     summaryTotal.textContent = `Total links found: ${data.all_links.length}`;
                     
                     // Update title with the algorithm used and cache mode
@@ -340,13 +494,30 @@
                     
                     // Display cache stats if available
                     if (data.cache_stats) {
+                        // Remove existing cache info if present
+                        const existingCacheInfo = document.querySelector('.cache-info');
+                        if (existingCacheInfo) {
+                            existingCacheInfo.remove();
+                        }
+                        
                         const cacheInfo = document.createElement('div');
-                        cacheInfo.className = 'alert alert-info mt-3';
+                        cacheInfo.className = 'alert alert-info mt-3 cache-info';
                         cacheInfo.innerHTML = `
-                            <strong>Cache Information:</strong><br>
-                            Total Cached URLs: ${data.cache_stats.total_urls}<br>
-                            Cache Size: ${data.cache_stats.cache_size_mb} MB<br>
-                            Last Updated: ${data.cache_stats.last_updated}
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-database me-2"></i>
+                                <strong>Cache Information:</strong>
+                            </div>
+                            <div class="row mt-2">
+                                <div class="col-md-4">
+                                    <small><strong>Total Cached URLs:</strong> ${data.cache_stats.total_urls}</small>
+                                </div>
+                                <div class="col-md-4">
+                                    <small><strong>Cache Size:</strong> ${data.cache_stats.cache_size_mb.toFixed(2)} MB</small>
+                                </div>
+                                <div class="col-md-4">
+                                    <small><strong>Last Updated:</strong> ${data.cache_stats.last_updated || 'Never'}</small>
+                                </div>
+                            </div>
                         `;
                         document.querySelector('.search-results').appendChild(cacheInfo);
                     }
@@ -369,7 +540,7 @@
                 .then(data => {
                     const message = `Cache Statistics:
 - Total URLs: ${data.total_urls}
-- Cache Size: ${data.cache_size_mb} MB
+- Cache Size: ${data.cache_size_mb.toFixed(2)} MB
 - Last Updated: ${data.last_updated || 'Never'}`;
                     alert(message);
                 })
@@ -377,7 +548,8 @@
                     alert('Error fetching cache statistics: ' + error.message);
                 });
         }
-          // Function to clear cache
+        
+        // Function to clear cache
         function clearCache() {
             if (confirm('Are you sure you want to clear all cached data? This action cannot be undone.')) {
                 fetch('/clear-cache', {
